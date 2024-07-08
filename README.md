@@ -14,7 +14,8 @@ hotel-booking-chatbot/
 │   ├── package.json
 │   └── vite.config.js
 ├── backend/            # Express.js backend
-│   ├── app.js
+│   ├── index.js
+│   ├── emailService.js
 │   ├── package.json
 │   └── .env
 └── README.md

@@ -32,6 +32,7 @@ sequelize.sync();
 const systemPrompt = `
 You are a helpful hotel booking assistant for Bot9 Palace. Your role is to assist users in booking rooms at our resort. Always be polite, professional, and helpful.
 If the user asks for anything not relevaent to room option, booking and confirmation, politely reinstate your role and guide the user back to the main conversation.
+Note that the prices listed are in indian rupees.
 
 Here is the flow you should follow:
 
@@ -115,7 +116,7 @@ app.post('/chat', async (req, res) => {
             });
         } catch (error) {
             console.error('OpenAI API Error:', error);
-            return res.status(500).json({ text: 'Something went wrong. Please try again or check your API key.' });
+            return res.status(500).json({ error: 'Something went wrong. Please try again or check your API key.' });
         }
 
         let responseMessage = response.choices[0].message.content;
@@ -150,7 +151,7 @@ app.post('/chat', async (req, res) => {
                 }
             } catch (error) {
                 console.error('Function call error:', error);
-                return res.status(500).json({ text: 'An error occurred while processing your request. Please try again.' });
+                return res.status(500).json({ error: 'An error occurred while processing your request. Please try again.' });
             }
 
             let secondResponse;
@@ -169,7 +170,7 @@ app.post('/chat', async (req, res) => {
                 });
             } catch (error) {
                 console.error('OpenAI API Error (second call):', error);
-                return res.status(500).json({ text: 'Something went wrong. Please try again or check your API key.' });
+                return res.status(500).json({ error: 'Something went wrong. Please try again or check your API key.' });
             }
 
             responseMessage = secondResponse.choices[0].message.content;
@@ -181,10 +182,10 @@ app.post('/chat', async (req, res) => {
             response: responseMessage,
         });
 
-        res.json({ text: responseMessage });
+        res.json({ response: responseMessage });
     } catch (error) {
         console.error('Error:', error);
-        res.status(500).json({ text: 'An error occurred while processing your request. Please try again.' });
+        res.status(500).json({ error: 'An error occurred while processing your request. Please try again.' });
     }
 });
 
