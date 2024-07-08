@@ -1,9 +1,10 @@
-require('dotenv').config();
+require('dotenv').config({ path: '.env.local' });
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const OpenAI = require('openai');
 const { Sequelize, DataTypes } = require('sequelize');
+const sendEmail = require('./emailService');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -17,7 +18,7 @@ const openai = new OpenAI({
 
 const sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: 'chatbot.sqlite'
+    storage: 'history.sqlite'
 });
 
 const Conversation = sequelize.define('Conversation', {
@@ -29,18 +30,20 @@ const Conversation = sequelize.define('Conversation', {
 sequelize.sync();
 
 const systemPrompt = `
-You are a helpful hotel booking assistant for Bot9 Palace. Your role is to assist users in booking rooms at our resort. Here's how you should behave:
+You are a helpful hotel booking assistant for Bot9 Palace. Your role is to assist users in booking rooms at our resort. Always be polite, professional, and helpful.
+If the user asks for anything not relevaent to room option, booking and confirmation, politely reinstate your role and guide the user back to the main conversation.
+
+Here is the flow you should follow:
 
 1. Greet the user and ask how you can help with their room booking.
 2. When asked about room options, use the 'get_room_options' function to fetch and present available rooms.
 3. Provide details about room amenities, prices, and availability when asked.
 4. Ask for which type of room the user would like to book and how many nights they plan to stay.
 5. Provide a summary of the booking details along with the price and ask the user to confirm.
-6. once and only if the user confirms, ask for their full name and email address to complete the booking.
-7. Use the 'book_room' function to book the room with the provided details.
-8. Always be polite, professional, and helpful.
-9. If you don't have information about something, politely say so and offer to find out.
-10. End conversations by thanking the user and asking if there's anything else you can help with.
+6. Once and only if the user confirms, ask for their full name and email address to complete the booking.
+7. Use the 'book_room' function to book the room with the provided details and return the booking details and say that you have sent a email for the same.
+8. If you don't have information about something, politely say so and offer to find out.
+10. End conversations by thanking the user for4 using the service and ask if they need help with anything else.
 
 Remember, your main goal is to help users book rooms efficiently and pleasantly.
 `;
@@ -102,12 +105,18 @@ app.post('/chat', async (req, res) => {
             },
         ];
 
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4',
-            messages: messages,
-            functions: functions,
-            function_call: 'auto',
-        });
+        let response;
+        try {
+            response = await openai.chat.completions.create({
+                model: 'gpt-4',
+                messages: messages,
+                functions: functions,
+                function_call: 'auto',
+            });
+        } catch (error) {
+            console.error('OpenAI API Error:', error);
+            return res.status(500).json({ text: 'Something went wrong. Please try again or check your API key.' });
+        }
 
         let responseMessage = response.choices[0].message.content;
 
@@ -116,29 +125,52 @@ app.post('/chat', async (req, res) => {
             const functionArgs = JSON.parse(response.choices[0].message.function_call.arguments);
 
             let functionResult;
-            if (functionName === 'get_room_options') {
-                functionResult = await getRoomOptions();
-            } else if (functionName === 'book_room') {
-                functionResult = await bookRoom(
-                    functionArgs.roomId,
-                    functionArgs.fullName,
-                    functionArgs.email,
-                    functionArgs.nights
-                );
+            try {
+                if (functionName === 'get_room_options') {
+                    functionResult = await getRoomOptions();
+                } else if (functionName === 'book_room') {
+                    functionResult = await bookRoom(
+                        functionArgs.roomId,
+                        functionArgs.fullName,
+                        functionArgs.email,
+                        functionArgs.nights
+                    );
+
+                    if (functionResult.message === 'Booking successful') {
+                        sendEmail(
+                            functionArgs.email,
+                            functionArgs.fullName,
+                            functionResult.roomName,
+                            functionResult.roomType,
+                            functionArgs.nights,
+                            functionResult.bookingId,
+                            functionResult.totalPrice
+                        );
+                    }
+                }
+            } catch (error) {
+                console.error('Function call error:', error);
+                return res.status(500).json({ text: 'An error occurred while processing your request. Please try again.' });
             }
 
-            const secondResponse = await openai.chat.completions.create({
-                model: 'gpt-4',
-                messages: [
-                    ...messages,
-                    response.choices[0].message,
-                    {
-                        role: 'function',
-                        name: functionName,
-                        content: JSON.stringify(functionResult),
-                    },
-                ],
-            });
+            let secondResponse;
+            try {
+                secondResponse = await openai.chat.completions.create({
+                    model: 'gpt-4',
+                    messages: [
+                        ...messages,
+                        response.choices[0].message,
+                        {
+                            role: 'function',
+                            name: functionName,
+                            content: JSON.stringify(functionResult),
+                        },
+                    ],
+                });
+            } catch (error) {
+                console.error('OpenAI API Error (second call):', error);
+                return res.status(500).json({ text: 'Something went wrong. Please try again or check your API key.' });
+            }
 
             responseMessage = secondResponse.choices[0].message.content;
         }
@@ -149,10 +181,10 @@ app.post('/chat', async (req, res) => {
             response: responseMessage,
         });
 
-        res.json({ response: responseMessage });
+        res.json({ text: responseMessage });
     } catch (error) {
         console.error('Error:', error);
-        res.status(500).json({ error: 'An error occurred while processing your request.' });
+        res.status(500).json({ text: 'An error occurred while processing your request. Please try again.' });
     }
 });
 

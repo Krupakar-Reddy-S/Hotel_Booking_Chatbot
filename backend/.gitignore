@@ -1,3 +1,4 @@
 node_modules/
-chatbot.sqlite
-.env
+history.sqlite
+gemini.js
+.env.local
